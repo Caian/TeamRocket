@@ -22,10 +22,6 @@
 // #define WHOAMI "james"
 // #define WHOAMI "meowth"
 
-// Change this to match your network
-// #define STASSID "TODO"
-// #define STAPSK  "TODO"
-
 // Change this to match your pinout
 const int gpioDht = 14;
 const int led = 2;

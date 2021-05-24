@@ -22,17 +22,24 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <DHTesp.h>
+#include <FS.h>
 
-// The WHOAMI string with the DNS name and the WiFi network information must
-// be defined before including this file!
+// The WHOAMI string with the DNS name must be defined by the including file
 
-#define COM_BAUD 115200
 #define BOOT_WAIT_SECS 10
 #define WIFI_WAIT_SECS 20
 #define SENSOR_UPDATE_FREQ_MILLIS 10000
+#define SERIAL_TIMEOUT_MILLIS 1000
 
-const char* ssid = STASSID;
-const char* password = STAPSK;
+#define MAX_SSID_SIZE 32
+#define MAX_PASS_SIZE 63
+#define SSID_LENGTH MAX_SSID_SIZE + 2
+#define PASS_LENGTH MAX_PASS_SIZE + 2
+
+#define AP_FILE "ap"
+
+char ssid[SSID_LENGTH];
+char password[PASS_LENGTH];
 
 ESP8266WebServer server(80);
 
@@ -183,6 +190,34 @@ void checkWiFi() {
   }
 }
 
+bool tryReadWiFiAuth() {
+  Serial.println("Network auth format: SSID/passw\\n");
+  if (Serial.available() == 0) {
+    return false;
+  }
+  int ssidRead = Serial.readBytesUntil('/', ssid, SSID_LENGTH-1);
+  if (ssidRead == 0) {
+    Serial.println("Empty SSID!");
+    return false;
+  }
+  else if (ssidRead > MAX_SSID_SIZE) {
+    Serial.println("SSID is too long!");
+    return false;
+  }
+  ssid[ssidRead] = '\x00';
+  int passRead = Serial.readBytesUntil('\n', password, PASS_LENGTH-1);
+  if (passRead == 0) {
+    Serial.println("Empty password!");
+    return false;
+  }
+  else if (passRead > MAX_PASS_SIZE) {
+    Serial.println("password is too long!");
+    return false;
+  }
+  password[passRead] = '\x00';
+  return true;
+}
+
 void setup(void) {
   dhtTemperature = 0;
   dhtLastUpdate = 0;
@@ -197,7 +232,7 @@ void setup(void) {
   }
 
   beginRegion();
-  Serial.begin(COM_BAUD);
+  Serial.begin(115200);
   while (!Serial) {
     delay(100);
     ledFlip();
@@ -214,6 +249,71 @@ void setup(void) {
   Serial.print("Hello from ");
   Serial.print(WHOAMI);
   Serial.println("!");
+
+  // Initialize the internal flash storage and read the WiFi credentials
+  beginRegion();
+  Serial.setTimeout(SERIAL_TIMEOUT_MILLIS);
+  bool hasWiFiAuth = tryReadWiFiAuth();
+  if (hasWiFiAuth) {
+    Serial.println("Using WiFi credentials:");
+    Serial.print("  ");
+    Serial.println(ssid);
+    Serial.print("  ");
+    Serial.println(password);
+  }
+  ledFlip();
+  if (!SPIFFS.begin()) {
+    Serial.println("Failed to open flash memory!");
+  }
+  else {
+    if (hasWiFiAuth) {
+      Serial.println("Saving WiFi credentials...");
+      File apFile = SPIFFS.open(AP_FILE, "w");
+      if (!apFile) {
+        Serial.println("IO error!");
+      }
+      else {
+        if (apFile.write(ssid, SSID_LENGTH) != SSID_LENGTH) {
+          Serial.println("IO error!");
+        }
+        if (apFile.write(password, PASS_LENGTH) != PASS_LENGTH) {
+          Serial.println("IO error!");
+        }
+        apFile.close();
+      }
+    }
+    else if (!SPIFFS.exists(AP_FILE)) {
+      Serial.println("Credentials file does not exist!");
+    }
+    else {
+      Serial.println("Loading WiFi credentials...");
+      File apFile = SPIFFS.open(AP_FILE, "r");
+      if (!apFile) {
+        Serial.println("IO error!");
+      }
+      else {
+        if (apFile.read((uint8_t*)ssid, SSID_LENGTH) != SSID_LENGTH) {
+          Serial.println("IO error!");
+        }
+        if (apFile.read((uint8_t*)password, PASS_LENGTH) != PASS_LENGTH) {
+          Serial.println("IO error!");
+        }
+        apFile.close();
+        hasWiFiAuth = true;
+        Serial.println("Using WiFi credentials:");
+        Serial.print("  ");
+        Serial.println(ssid);
+        Serial.print("  ");
+        Serial.println(password);
+      }
+    }
+    SPIFFS.end();
+  }
+  if (!hasWiFiAuth) {
+    Serial.println("No WiFi credentials available!");
+    halt();
+  }
+  endRegion();
 
   // Initialize the temperature sensor
   beginRegion();
