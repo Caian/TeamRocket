@@ -24,6 +24,27 @@ The devices expose a COM port with baud rate `115200` for debug, including a
 pre-scan of available networks. The devices will wait `10 seconds` before
 initializing so the user have time to properly establish the connection.
 
+If you don't have the Arduino serial monitor, an alternative is minicom 
+(the TTY device may vary):
+
+```
+sudo minicom -D /dev/ttyUSB0 -b 115200 -8
+```
+
+# Setting up Wi-Fi
+
+The SSID and password for the network are saved in a flash memory present 
+on the devices. To connect for the first time or to change credentials, 
+open de serial connection to the device and send the new credentials in 
+the following format:
+
+```
+SSID/password\n
+```
+
+Where `\n` is a simple new-line without the `\r` carriage return. **This must 
+be done during the 10 second grace period before initialization.**
+
 # Accessing the unit
 
 After a successfull initialization, the devices will be accessible via `http`
