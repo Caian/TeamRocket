@@ -17,6 +17,8 @@
  * along with TeamRocket.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <TeamRocket.h>
+
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
@@ -407,3 +409,4 @@ void loop(void) {
   server.handleClient();
   MDNS.update();
 }
+

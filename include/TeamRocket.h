@@ -17,6 +17,8 @@
  * along with TeamRocket.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#pragma once
+
 // Change this to match your device
 // #define WHOAMI "jessie"
 // #define WHOAMI "james"
@@ -25,5 +27,3 @@
 // Change this to match your pinout
 const int gpioDht = 14;
 const int led = 2;
-
-#include "./TeamRocket.h"
