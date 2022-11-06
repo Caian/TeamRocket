@@ -38,6 +38,19 @@
 #define SSID_LENGTH MAX_SSID_SIZE + 2
 #define PASS_LENGTH MAX_PASS_SIZE + 2
 
+#define CODE_WIFIAUTH 2
+#define CODE_WIFICONN 3
+#define CODE_DHTINIT  4
+#define CODE_WIFIINIT 5
+#define CODE_WIFISCAN 6
+#define CODE_DNSINIT  7
+#define CODE_HTTPINIT 8
+
+#define ERR_NOAUTH      1
+#define ERR_WIFIHW      2
+#define ERR_WIFICONN    3
+#define ERR_WIFITIMEOUT 4
+
 #define AP_FILE "ap"
 
 char ssid[SSID_LENGTH];
@@ -72,26 +85,42 @@ void ledFlip() {
   }
 }
 
-void beginRegion() {
-  ledOn();
-}
-
-void endRegion() {
-  delay(200);
+void region(unsigned int code) {
   ledOff();
-  delay(200);
+  delay(250);
+  ledOn();
+  delay(250);
+  ledOff();
+  delay(250);
+  ledOn();
+  delay(code * 1000);
+  ledOff();
+  delay(500);
 }
 
-void halt() {
+void halt(unsigned int code, bool restart=true) {
+  ledOff();
   while (true) {
-    ledOff();
-    delay(100);
+    for (int j = 0; j < 5; j++) {
+      for (unsigned int i = 0; i < code; i++) {
+        ledOn();
+        delay(500);
+        ledOff();
+        delay(500);
+      }
+      delay(2000);
+    }
+    if (restart)
+      break;
   }
+  ESP.restart();
 }
 
 void sendDHT11Data() {
   // Format the temperature with one decimal place
-  String res = String(dhtTemperature, 1);
+  String res = String(dhtLastUpdate);
+  res += ",ms,";
+  res += String(dhtTemperature, 1);
   res += ",oC,";
   res += String(dhtHumidity, 1);
   res += ",%";
@@ -103,7 +132,6 @@ void updateDHT11Data() {
   // Update the sensor every SENSOR_UPDATE_FREQ_MILLIS
   if (nowMs - dhtLastUpdate < SENSOR_UPDATE_FREQ_MILLIS)
     return;
-  ledOn();
   Serial.print("Updating sensor data... ");
   TempAndHumidity dhtData = dht.getTempAndHumidity();
   if (!isnan(dhtData.temperature)) {
@@ -115,23 +143,18 @@ void updateDHT11Data() {
   Serial.print(dhtTemperature);
   Serial.print(",");
   Serial.println(dhtHumidity);
-  ledOff();
   // Call millis again to compensate for the
   // delay when reading from the sensor
   dhtLastUpdate = millis();
 }
 
 void handleRoot() {
-  ledOn();
   sendDHT11Data();
-  ledOff();
 }
 
 void handleNotFound() {
   // Send the data anyway...
-  ledOn();
   sendDHT11Data();
-  ledOff();
 }
 
 const char* formatWiFiStatus(int s) {
@@ -148,38 +171,34 @@ const char* formatWiFiStatus(int s) {
   }
 }
 
-int connectWiFi() {
-  int failed = 1;
+void connectWiFi() {
   // Begin connection
-  beginRegion();
+  region(CODE_WIFICONN);
   Serial.print("Connecting to SSID ");
   WiFi.disconnect();
   WiFi.mode(WIFI_STA);
   Serial.print(ssid);
   Serial.println("...");
   WiFi.begin(ssid, password);
-  endRegion();
   // Wait for connection
-  beginRegion();
-  for (int i = 0; i < 2*WIFI_WAIT_SECS; i++) {
+  for (int i = 0; i < 4*WIFI_WAIT_SECS; i++) {
     int wifiStatus = WiFi.status();
     Serial.print("Connecting (");
     Serial.print(formatWiFiStatus(wifiStatus));
     Serial.println(")...");
     if (wifiStatus == WL_CONNECT_FAILED) {
-      break;
+      halt(ERR_WIFICONN);
     }
     if (wifiStatus == WL_CONNECTED) {
-      failed = 0;
       Serial.print("Connected with IP ");
       Serial.println(WiFi.localIP());
-      break;
+      ledOff();
+      return;
     }
-    delay(500);
+    delay(250);
     ledFlip();
   }
-  endRegion();
-  return failed;
+  halt(ERR_WIFITIMEOUT);
 }
 
 void checkWiFi() {
@@ -233,14 +252,9 @@ void setup(void) {
     ledFlip();
   }
 
-  beginRegion();
   Serial.begin(115200);
-  while (!Serial) {
-    delay(100);
-    ledFlip();
-  }
-  endRegion();
 
+  ledOff();
   for (int i = 0; i < BOOT_WAIT_SECS; i++) {
     ledFlip();
     Serial.print("Starting in ");
@@ -248,12 +262,14 @@ void setup(void) {
     Serial.println(" seconds...");
     delay(1000);
   }
+  ledOff();
+
   Serial.print("Hello from ");
   Serial.print(WHOAMI);
   Serial.println("!");
 
   // Initialize the internal flash storage and read the WiFi credentials
-  beginRegion();
+  region(CODE_WIFIAUTH);
   Serial.setTimeout(SERIAL_TIMEOUT_MILLIS);
   bool hasWiFiAuth = tryReadWiFiAuth();
   if (hasWiFiAuth) {
@@ -263,7 +279,6 @@ void setup(void) {
     Serial.print("  ");
     Serial.println(password);
   }
-  ledFlip();
   if (!SPIFFS.begin()) {
     Serial.println("Failed to open flash memory!");
   }
@@ -313,22 +328,19 @@ void setup(void) {
   }
   if (!hasWiFiAuth) {
     Serial.println("No WiFi credentials available!");
-    halt();
+    halt(ERR_NOAUTH);
   }
-  endRegion();
-
   // Initialize the temperature sensor
-  beginRegion();
+  region(CODE_DHTINIT);
   Serial.println("Starting temperature sensor...");
   dht.setup(gpioDht, DHTesp::DHT11);
-  endRegion();
 
   // Initialize the WiFi module
-  beginRegion();
+  region(CODE_WIFIINIT);
   Serial.println("Starting WiFi...");
   if (WiFi.status() == WL_NO_SHIELD) {
     Serial.println("WiFi hardware not found!");
-    halt();
+    halt(ERR_WIFIHW);
   }
   // print your MAC address:
   byte mac[6];
@@ -345,9 +357,9 @@ void setup(void) {
   Serial.print(mac[4], HEX);
   Serial.print(":");
   Serial.println(mac[5], HEX);
-  endRegion();
+
   // List networks in range
-  beginRegion();
+  region(CODE_WIFISCAN);
   Serial.println("Scanning networks in range...");
   int numSsids = WiFi.scanNetworks();
   if (numSsids == -1) {
@@ -381,32 +393,35 @@ void setup(void) {
       }
     }
   }
-  endRegion();
-  // Connect to the network
-  while (connectWiFi() != 0) ;
 
-  beginRegion();
+  // Connect to the network
+  connectWiFi();
+
+  region(CODE_DNSINIT);
   Serial.print("Starting DNS responder as ");
   Serial.print(WHOAMI);
   Serial.println("...");
   if (MDNS.begin(WHOAMI)) {
     Serial.println("MDNS responder started");
   }
-  endRegion();
 
-  beginRegion();
+  region(CODE_HTTPINIT);
   Serial.println("Starting HTTP server...");
   server.on("/", handleRoot);
   server.onNotFound(handleNotFound);
   server.begin();
   Serial.println("HTTP server started.");
-  endRegion();
+
+  ledOn();
 }
 
 void loop(void) {
   updateDHT11Data();
+  ledOn();
   checkWiFi();
+  ledOn();
   server.handleClient();
+  ledOn();
   MDNS.update();
+  ledOn();
 }
-
